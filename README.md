@@ -1,14 +1,53 @@
-# Android ADB Python Library
+# AndroidAPI
 
-A Python library for interacting with Android devices over ADB and Fastboot. Provides helpers for detecting device state, rebooting to specific modes, and opening or closing apps.
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+![Python 3.13](https://img.shields.io/badge/Python_3.13-3776AB?logo=python&logoColor=white)
+![Python 3.14](https://img.shields.io/badge/Python_3.14-3776AB?logo=python&logoColor=white)
+![Python 3.15](https://img.shields.io/badge/Python_3.15-3776AB?logo=python&logoColor=white)
+
+A Python library for interacting with Android devices over ADB and Fastboot. Provides helpers for detecting device state, rebooting to specific modes, opening and closing apps, querying device info, and sideloading APKs. All APIs support multi-device targeting via an optional `DeviceSerial` parameter.
 
 ---
 
 ## Requirements
 
-- Python 3.8+
-- ADB and Fastboot installed and accessible on your system
+- Python 3.13+
+- ADB and Fastboot installed on your system
 - A connected Android device with USB debugging enabled
+
+---
+
+## Installation
+
+Copy `AndroidAPI.py` into your project directory and import from it directly:
+
+```python
+from AndroidAPI import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
+```
+
+---
+
+## Multi-Device Support
+
+Every method accepts an optional `DeviceSerial` parameter. If you have multiple devices connected, pass the serial to target a specific one. If you only have one device connected, you can omit it entirely and it will default to `None`, meaning ADB will target the only connected device automatically.
+
+You can find the serial of your connected devices by running:
+
+```bash
+adb devices
+```
+
+Example with serial:
+
+```python
+AndroidInfo.AndroidVersion("/usr/bin/adb", say=True, DeviceSerial="R5CT21AABCD")
+```
+
+Example without serial (single device):
+
+```python
+AndroidInfo.AndroidVersion("/usr/bin/adb", say=True)
+```
 
 ---
 
@@ -16,44 +55,53 @@ A Python library for interacting with Android devices over ADB and Fastboot. Pro
 
 ### `DeviceInfo`
 
-A helper class that provides information about the current state of the connected Android device.
+Helper class for detecting the current state of the connected device.
 
-#### `DeviceInfo.GetDeviceInfo() -> str`
+---
 
-Detects the current state of the connected device and returns it as a string.
+#### `DeviceInfo.GetDeviceInfo(ADBPath, FastbootPath, DeviceSerial=None) -> str`
 
-It first attempts to reach the device via ADB. If that fails, it falls back to Fastboot to distinguish between Bootloader and Fastbootd.
+Detects the current state of the device. Tries ADB first, then falls back to Fastboot.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `FastbootPath` | `str` | Full path to the Fastboot binary |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
 
 Possible return values:
 
 | Return Value | Meaning |
 |---|---|
-| `"Normal"` | Device is booted into Android (SysUI) |
-| `"Recovery"` | Device is in Recovery or ADB Sideload mode |
-| `"fastbootd"` | Device is in Fastbootd (userspace fastboot) |
-| `"bootloader"` | Device is in the Bootloader |
-| `"Unknown"` | Device could not be reached via ADB or Fastboot |
+| `"Normal"` | Device is booted into Android |
+| `"Recovery"` | Device is in Recovery or Sideload mode |
+| `"fastbootd"` | Device is in Fastbootd |
+| `"bootloader"` | Device is in Bootloader |
+| `"Unknown"` | Device could not be reached |
 
 Example:
 
 ```python
-state = DeviceInfo.GetDeviceInfo()
+state = DeviceInfo.GetDeviceInfo("/usr/bin/adb", "/usr/bin/fastboot")
 print(state)
 ```
 
 ---
 
-#### `DeviceInfo._match_states(State: str) -> str | None`
+#### `DeviceInfo._match_states(ADBPath, FastbootPath, State, DeviceSerial=None) -> str | None`
 
-Checks whether the device is already in the state you are trying to reach.
+Checks whether the device is already in the target state. Returns a message string if it is, or `None` if it is not. Used internally by `DevicePower.RebootTo()`.
 
-Returns a message string if the device is already on the target state, or `None` if it is not.
+| Parameter | Type | Description |
+|---|---|---|
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `FastbootPath` | `str` | Full path to the Fastboot binary |
+| `State` | `str` | Target state to check against (case insensitive) |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
 
-This is used internally by `Reboot.RebootTo()` to prevent rebooting into the state the device is already in.
+Accepted values for `State`:
 
-Accepted values for `State` (case insensitive):
-
-| State Argument | Matches Device State |
+| Value | Matches Device State |
 |---|---|
 | `"system"` | `"Normal"` |
 | `"recovery"` | `"Recovery"` |
@@ -63,73 +111,93 @@ Accepted values for `State` (case insensitive):
 Example:
 
 ```python
-result = DeviceInfo._match_states("recovery")
-if result is not None:
-    print(result)
+match = DeviceInfo._match_states("/usr/bin/adb", "/usr/bin/fastboot", "recovery")
+if match is not None:
+    print(match)
 else:
     print("Not in recovery, safe to proceed")
 ```
 
 ---
 
-### `Reboot`
+### `DevicePower`
 
-Handles rebooting the connected device to a specific state.
+Handles rebooting and shutting down the device.
 
-#### `Reboot.RebootTo(ADBPath: str, State: str) -> str`
+---
 
-Reboots the device to the specified state using the ADB binary at the given path.
+#### `DevicePower.RebootTo(ADBPath, FastbootPath, State, DeviceSerial=None) -> str`
 
-Before rebooting, it verifies that the ADB path exists and that the device is not already in the target state.
-
-Parameters:
+Reboots the device to the specified state. Exits with an error if the device is already in the target state.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `ADBPath` | `str` | Full path to the ADB binary, e.g. `"/usr/bin/adb"` |
-| `State` | `str` | Target state to reboot into (see table below) |
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `FastbootPath` | `str` | Full path to the Fastboot binary |
+| `State` | `str` | Target state to reboot into (case insensitive) |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
 
-Accepted values for `State` (case insensitive):
+Accepted values for `State`:
 
-| State Argument | Reboots To |
+| Value | Reboots To |
 |---|---|
-| `"system"` | Android (SysUI) |
+| `"system"` | Android |
 | `"recovery"` | Recovery |
 | `"fastbootd"` | Fastbootd |
 | `"bootloader"` | Bootloader |
 
-If the ADB path does not exist, the program exits with an error. If the device is already in the target state, the program exits with an error message.
+Example:
+
+```python
+DevicePower.RebootTo("/usr/bin/adb", "/usr/bin/fastboot", "recovery")
+```
+
+---
+
+#### `DevicePower.Shutdown(ADBPath, SafelyOrNo, DeviceSerial=None) -> str`
+
+Shuts down the device either gracefully or forcefully.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `SafelyOrNo` | `str` | Shutdown mode: `"graceful"` or `"force"` |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
+
+| Value | Behaviour |
+|---|---|
+| `"graceful"` | Clean shutdown via `svc power shutdown` |
+| `"force"` | Hard shutdown via `reboot -p` |
 
 Example:
 
 ```python
-Reboot.RebootTo("/usr/bin/adb", "recovery")
+DevicePower.Shutdown("/usr/bin/adb", "graceful")
 ```
 
 ---
 
 ### `OpenApp`
 
-Handles launching an app on the connected Android device.
+Handles launching and force stopping apps on the device.
 
-#### `OpenApp.Open(ADBPath: str, PackageName: str) -> str`
+---
 
-Launches the app with the given package name on the device using `am start`.
+#### `OpenApp.Open(ADBPath, PkgName, DeviceSerial=None) -> str`
 
-Parameters:
+Launches an app by its package name using `am start`.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `ADBPath` | `str` | Full path to the ADB binary, e.g. `"/usr/bin/adb"` |
-| `PackageName` | `str` | Android package name of the app, e.g. `"com.android.chrome"` |
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `PkgName` | `str` | Android package name, e.g. `"com.android.chrome"` |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
 
-The package name is the app's unique identifier on Android, not its display name. You can find the package name of any installed app by running:
+To find the package name of an installed app:
 
 ```bash
 adb shell pm list packages
 ```
-
-If the launch fails, the program exits with an error message.
 
 Example:
 
@@ -139,39 +207,104 @@ OpenApp.Open("/usr/bin/adb", "com.android.chrome")
 
 ---
 
-### `CloseApp`
+#### `OpenApp.Close(ADBPath, PkgName, DeviceSerial=None) -> str`
 
-Handles force stopping an app on the connected Android device.
-
-#### `CloseApp.Close(ADBPath: str, PackageName: str) -> str`
-
-Force stops the app with the given package name using `am force-stop`. This is equivalent to force stopping an app from Android Settings.
-
-Parameters:
+Force stops an app by its package name using `am force-stop`. Equivalent to force stopping from Android Settings.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `ADBPath` | `str` | Full path to the ADB binary, e.g. `"/usr/bin/adb"` |
-| `PackageName` | `str` | Android package name of the app, e.g. `"com.android.chrome"` |
-
-If the force stop fails, the program exits with an error message.
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `PkgName` | `str` | Android package name, e.g. `"com.android.chrome"` |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
 
 Example:
 
 ```python
-CloseApp.Close("/usr/bin/adb", "com.android.chrome")
+OpenApp.Close("/usr/bin/adb", "com.android.chrome")
+```
+
+---
+
+### `AndroidInfo`
+
+Queries device information via `getprop`.
+
+All methods share the same `say` parameter: if `True`, the value is printed to the console. If `False` (default), it is returned as a string.
+
+---
+
+#### `AndroidInfo.AndroidVersion(ADBPath, say=False, DeviceSerial=None) -> str`
+
+Returns the Android version, e.g. `"14"`.
+
+Example:
+
+```python
+AndroidInfo.AndroidVersion("/usr/bin/adb", say=True)
+version = AndroidInfo.AndroidVersion("/usr/bin/adb")
+```
+
+---
+
+#### `AndroidInfo.AndroidSDKVersion(ADBPath, say=False, DeviceSerial=None) -> str`
+
+Returns the SDK level, e.g. `"34"`.
+
+Example:
+
+```python
+AndroidInfo.AndroidSDKVersion("/usr/bin/adb", say=True)
+sdk = AndroidInfo.AndroidSDKVersion("/usr/bin/adb")
+```
+
+---
+
+#### `AndroidInfo.AndroidBuildID(ADBPath, say=False, DeviceSerial=None) -> str`
+
+Returns the build ID, e.g. `"UQ1A.240205.002"`.
+
+Example:
+
+```python
+AndroidInfo.AndroidBuildID("/usr/bin/adb", say=True)
+build = AndroidInfo.AndroidBuildID("/usr/bin/adb")
+```
+
+---
+
+### `SideloadAPK`
+
+Handles installing APK files onto the device.
+
+---
+
+#### `SideloadAPK.SideloadAPK(ADBPath, APKPath, DeviceSerial=None) -> str`
+
+Installs an APK onto the device using `adb install -r`. Validates that both paths exist and that the file has a `.apk` extension before attempting installation.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `ADBPath` | `str` | Full path to the ADB binary |
+| `APKPath` | `str` | Full path to the APK file |
+| `DeviceSerial` | `str` | Optional device serial for multi-device setups |
+
+Example:
+
+```python
+SideloadAPK.SideloadAPK("/usr/bin/adb", "/home/user/Downloads/myapp.apk")
 ```
 
 ---
 
 ## Error Handling
 
-All methods print errors in red using ANSI escape codes and call `sys.exit(1)` on failure. This means any error is fatal and will stop the program. Handle accordingly if you need non-fatal behavior.
+All methods print errors in red using ANSI escape codes and call `sys.exit(1)` on failure, making every error fatal. If you need non-fatal behavior, wrap calls in a `try/except SystemExit`.
 
 ---
 
 ## Notes
 
-- `DeviceInfo` and `_match_states` are considered helper/internal classes and are not intended to be the primary interface.
-- `Reboot`, `OpenApp`, and `CloseApp` are the main classes intended for direct use.
-- The device must be connected and recognized by ADB or Fastboot before calling any method.
+- `DeviceInfo` is a helper class and is not intended to be the primary interface.
+- `DevicePower`, `OpenApp`, `AndroidInfo`, and `SideloadAPK` are the main classes for direct use.
+- The device must be reachable via ADB or Fastboot before calling any method.
+- `DeviceSerial` is always the last parameter on every method and always defaults to `None`.
