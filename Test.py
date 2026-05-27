@@ -1,4 +1,4 @@
-from AndroidAPI import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
+from AndroidAPIs import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
 
 ADBPath = str(input("Path to ADB: "))
 FastbootPath = str(input("Path to fastboot: "))
