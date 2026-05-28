@@ -1,35 +1,25 @@
-from AndroidAPIs import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
+from AndroidAPI import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
+from AdbConnect import AdbUsbConnect
 
-ADBPath = str(input("Path to ADB: "))
-FastbootPath = str(input("Path to fastboot: "))
+import os;os.system("")
 
-print("=== Device State ===")
-state = DeviceInfo.GetDeviceInfo(ADBPath, FastbootPath)
-print(f"Current state: {state}")
+print("\x1b[31mMake sure to connect to USB before executing!\033[0m")
+input("Press enter when you have connected your device")
 
-print("\n=== Match States ===")
-match = DeviceInfo._match_states(ADBPath, FastbootPath, "recovery")
-if match is not None:
-    print(match)
+conn = AdbUsbConnect()
+print(DeviceInfo.GetDeviceInfo(conn))
+
+AndroidInfo.AndroidVersion(conn, say=True)
+AndroidInfo.AndroidSDKVersion(conn, say=True)
+AndroidInfo.AndroidBuildID(conn, say=True)
+
+OpenApp.Open(conn, "com.android.chrome")
+OpenApp.Close(conn, "com.android.chrome")
+
+a = input("Please enter yes or no to shutdown device: ")
+if a.lower == "yes":
+    DevicePower.Shutdown(conn, "graceful")
 else:
-    print("Device is not in recovery")
+    pass
 
-print("\n=== Android Info ===")
-AndroidInfo.AndroidVersion(ADBPath, say=True)
-AndroidInfo.AndroidSDKVersion(ADBPath, say=True)
-AndroidInfo.AndroidBuildID(ADBPath, say=True)
-
-print("\n=== Open App ===")
-OpenApp.Open(ADBPath, "com.android.chrome")
-
-import time
-time.sleep(3)
-
-print("\n=== Close App ===")
-OpenApp.Close(ADBPath, "com.android.chrome")
-
-print("\n=== Sideload APK ===")
-SideloadAPK.SideloadAPK(ADBPath, "/home/user/Downloads/myapp.apk")
-
-print("\n=== Shutdown (graceful) ===")
-DevicePower.Shutdown(ADBPath, "graceful")
+conn.close()

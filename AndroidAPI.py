@@ -1,63 +1,87 @@
-import subprocess as s
+# All imports used in the code
+import os;os.system("") #to enable VT on windows (Basically color support)
 import sys
 from pathlib import Path
-class VersionError(Exception):
-    pass
-class SideloadError(Exception):
-    pass
-s.run("", shell=True)
+from AdbConnect import AdbConnection
+#--------------------------------------------------------------------------------
+"""Copyright (c) 2026 Alan. All Rights Reserved."""
+#--------------------------------------------------------------------------------
+"""These are the custom classes we are using in the code!
+If you are making code and want to use the exceptions, dont modify the master function...
+-------------------------------------------------------------------------------------------------------
+RebootToOnState -> Error for rebooting to state you are on.
+UnknownState -> Given state that doesnt exist
+UnknownShutdownMode -> Not a option between ```graceful and force```
+ErrorWhileHandleApp -> couldnt close/open a app
+FailedToGetDeviceInfo -> was not able to retrieve info about device
+WrongFilePassedError -> not a .apk or any other file
+FailedToSideloadApp -> was not able to sideload app into device"""
+
+
+class RebootToOnState(Exception): pass
+class UnknownState(Exception): pass
+class UnknownShutdownMode(Exception): pass
+class ErrorWhileHandleApp(Exception): pass
+class FailedToGetDeviceInfo(Exception): pass
+class WrongFilePassedError(Exception): pass
+class FailedToSideloadApp(Exception): pass
+
+
+#Master function to handle all of the custom classes
+def Customclass_Handler(exctype, value, traceback):
+    #check for the classes here
+    if issubclass(exctype, RebootToOnState):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, UnknownState):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, UnknownShutdownMode):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, ErrorWhileHandleApp):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, FailedToGetDeviceInfo):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, WrongFilePassedError):
+        print(f"{exctype.__name__}: {value}")
+        
+    elif issubclass(exctype, FailedToSideloadApp):
+        print(f"{exctype.__name__}: {value}")
+        
+    else:
+        # Fallback for standard Python errors (Like FileNotFoundError)
+        sys.__excepthook__(exctype, value, traceback)
+
+
+# Now register the function to work fine!
+sys.excepthook = Customclass_Handler
+
+
 #Not considered a main class, RATHER helper classes!
 class DeviceInfo:
     @staticmethod
-    #Give device info -> return, usage: a = GetDeviceInfo()
-    def GetDeviceInfo(ADBPath: str, FastbootPath: str, DeviceSerial: str = None):
-        ADBP, FastP = Path(ADBPath), Path(FastbootPath)
-        if not ADBP.exists() and not FastP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path for ADB!\x1b[0m")
-            raise FileNotFoundError
-        adb_cmd = [ADBPath]
-        if DeviceSerial:
-            adb_cmd += ["-s", DeviceSerial]
-        adb_cmd += ["get-state"]
-        try:
-            adb = s.run(adb_cmd, capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while running ADB: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while running ADB: {e}\x1b[0m")
-            raise
-        except KeyboardInterrupt:
-            print(f"\x1b[31mStopped Operation!\x1b[0m")
-        if adb.returncode == 0:
-            state = adb.stdout.strip()
-            if state == "device":
-                return "Normal"
-            elif state == "recovery" or state == "sideload":
-                return "Recovery"
-        fastboot_cmd = [FastbootPath]
-        if DeviceSerial:
-            fastboot_cmd += ["-s", DeviceSerial]
-        fastboot_cmd += ["getvar", "current-slot"]
-        try:
-            fastboot = s.run(fastboot_cmd, capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while running Fastboot: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while running Fastboot: {e}\x1b[0m")
-            raise
-        if fastboot.returncode == 0:
-            combined = (fastboot.stdout + fastboot.stderr).lower()
-            if "fastbootd" in combined:
-                return "fastbootd"
+    #Give device info -> return, usage: a = GetDeviceInfo(conn)
+    def GetDeviceInfo(conn: AdbConnection) -> str:
+        result: str = conn.shell("getprop sys.boot_completed").strip()
+        if result == "1":
+            return "Normal"
+        recovery: str = conn.shell("getprop ro.bootmode").strip()
+        if recovery == "recovery":
+            return "Recovery"
+        fastbootd: str = conn.shell("getprop ro.bootmode").strip()
+        if fastbootd == "fastbootd":
+            return "fastbootd"
+        if fastbootd == "bootloader":
             return "bootloader"
         return "Unknown"
 
     @staticmethod
-    #match device state with argument state, usage: a = _match_states("MyState!")
-    def _match_states(ADBPath: str, FastbootPath: str, State: str, DeviceSerial: str = None) -> str:
-        match_func = DeviceInfo.GetDeviceInfo(ADBPath, FastbootPath, DeviceSerial)
+    #match device state with argument state, usage: a = _match_states(conn, "MyState!")
+    def _match_states(conn: AdbConnection, State: str) -> str | None:
+        match_func: str = DeviceInfo.GetDeviceInfo(conn)
         if match_func == "Normal" and State.lower() == "system":
             return f"Trying to get to {State} but on {match_func}!"
         elif match_func == "fastbootd" and State.lower() == "fastbootd":
@@ -70,222 +94,93 @@ class DeviceInfo:
 
 #Main classes--------------------------------------------------------
 class DevicePower:
-    #RebootTo -> ADBPath, 'reboot', State
+    #RebootTo -> conn, State
     @staticmethod
-    def RebootTo(ADBPath: str, FastbootPath: str, State: str, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path to ADB!\x1b[0m")
-            raise FileNotFoundError
-        b = DeviceInfo._match_states(ADBPath, FastbootPath, State, DeviceSerial)
+    def RebootTo(conn: AdbConnection, State: str) -> None:
+        b: str | None = DeviceInfo._match_states(conn, State)
         if b is not None:
-            print(f"\x1b[31m{b}\x1b[0m")
-            raise RuntimeError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            if State.lower() == "system":
-                s.run(cmd + ["reboot"])
-            elif State.lower() == "recovery":
-                s.run(cmd + ["reboot", "recovery"])
-            elif State.lower() == "fastbootd":
-                s.run(cmd + ["reboot", "fastboot"])
-            elif State.lower() == "bootloader":
-                s.run(cmd + ["reboot", "bootloader"])
-            else:
-                print(f"\x1b[31mUnknown state: {State}\x1b[0m")
-                raise ValueError
-        except OSError as e:
-            print(f"\x1b[31mOS error while rebooting: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while rebooting: {e}\x1b[0m")
-            raise
+            raise RebootToOnState(f"\x1b[31m{b}\x1b[0m")
+        if State.lower() == "system":
+            conn.shell("reboot")
+        elif State.lower() == "recovery":
+            conn.shell("reboot recovery")
+        elif State.lower() == "fastbootd":
+            conn.shell("reboot fastboot")
+        elif State.lower() == "bootloader":
+            conn.shell("reboot bootloader")
+        else:
+            raise UnknownState(f"\x1b[31mUnknown state: {State}\x1b[0m")
 
-    #Shutdown, ADBPath, graceful/force -> adb shell 'cmd'
+    #Shutdown, conn, graceful/force -> shell cmd
     @staticmethod
-    def Shutdown(ADBPath: str, SafelyOrNo: str, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path to ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            if SafelyOrNo.lower() == "graceful":
-                s.run(cmd + ["shell", "svc", "power", "shutdown"])
-            elif SafelyOrNo.lower() == "force":
-                s.run(cmd + ["shell", "reboot", "-p"])
-            else:
-                print(f"\x1b[31mUnknown shutdown mode: {SafelyOrNo}\x1b[0m")
-                raise ValueError
-        except OSError as e:
-            print(f"\x1b[31mOS error while shutting down: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while shutting down: {e}\x1b[0m")
-            raise
+    def Shutdown(conn: AdbConnection, SafelyOrNo: str) -> None:
+        if SafelyOrNo.lower() == "graceful":
+            conn.shell("svc power shutdown")
+        elif SafelyOrNo.lower() == "force":
+            conn.shell("reboot -p")
+        else:
+            raise UnknownShutdownMode(f"\x1b[31mUnknown shutdown mode: {SafelyOrNo}\x1b[0m")
 
 #-----------------------------------------------------------------
 class OpenApp:
-    #usage: Open("PathtoADB", "com.dev.package")
+    #usage: Open(conn, "com.dev.package")
     @staticmethod
-    def Open(ADBPath: str, PkgName: str, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path to ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            result = s.run(
-                cmd + ["shell", "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-p", PkgName],
-                capture_output=True, text=True
-            )
-        except OSError as e:
-            print(f"\x1b[31mOS error while opening app: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while opening app: {e}\x1b[0m")
-            raise
-        if result.returncode != 0:
-            print(f"\x1b[31mFailed to open: {PkgName}\x1b[0m")
-            raise RuntimeError
+    def Open(conn: AdbConnection, PkgName: str) -> None:
+        result: str = conn.shell(f"am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {PkgName}")
+        if "Error" in result or "Exception" in result:
+            raise ErrorWhileHandleApp(f"\x1b[31mFailed to open: {PkgName}\x1b[0m")
 
+    #usage: Close(conn, "com.dev.company.package")
     @staticmethod
-    #usage: Close("PathtoADB", "com.dev.company.package")
-    def Close(ADBPath: str, PkgName: str, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path to ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            result = s.run(
-                cmd + ["shell", "am", "force-stop", PkgName],
-                capture_output=True, text=True
-            )
-        except OSError as e:
-            print(f"\x1b[31mOS error while closing app: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while closing app: {e}\x1b[0m")
-            raise
-        if result.returncode != 0:
-            print(f"\x1b[31mFailed to close: {PkgName}\x1b[0m")
-            raise RuntimeError
+    def Close(conn: AdbConnection, PkgName: str) -> None:
+        result: str = conn.shell(f"am force-stop {PkgName}")
+        if "Error" in result or "Exception" in result:
+            raise ErrorWhileHandleApp(f"\x1b[31mFailed to close: {PkgName}\x1b[0m")
 
 #----------------------------------------------------------------
 class AndroidInfo:
     @staticmethod
-    def AndroidVersion(ADBPath: str, say=False, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path for ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            version = s.run(cmd + ["shell", "getprop", "ro.build.version.release"], capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while getting Android version: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while getting Android version: {e}\x1b[0m")
-            raise
-        if version.returncode != 0:
-            print("\x1b[31mFailed to get version!\x1b[0m")
-            raise VersionError
+    def AndroidVersion(conn: AdbConnection, say: bool = False) -> str | None:
+        version: str = conn.shell("getprop ro.build.version.release").strip()
+        if not version:
+            raise FailedToGetDeviceInfo("\x1b[31mFailed to get version!\x1b[0m")
         if say:
-            print(version.stdout.strip())
+            print(version)
         else:
-            return version.stdout.strip()
+            return version
 
     @staticmethod
-    def AndroidSDKVersion(ADBPath: str, say=False, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path for ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            version = s.run(cmd + ["shell", "getprop", "ro.build.version.sdk"], capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while getting SDK version: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while getting SDK version: {e}\x1b[0m")
-            raise
-        if version.returncode != 0:
-            print(f"\x1b[31mFailed to get version!\x1b[0m")
-            raise VersionError
+    def AndroidSDKVersion(conn: AdbConnection, say: bool = False) -> str | None:
+        version: str = conn.shell("getprop ro.build.version.sdk").strip()
+        if not version:
+            raise FailedToGetDeviceInfo(f"\x1b[31mFailed to get SDK version!\x1b[0m")
         if say:
-            print(version.stdout.strip())
+            print(version)
         else:
-            return version.stdout.strip()
+            return version
 
-    #Usage: AndroidBuildID("PathtoADB", say=True)
+    #Usage: AndroidBuildID(conn, say=True)
     @staticmethod
-    def AndroidBuildID(ADBPath: str, say=False, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path for ADB!\x1b[0m")
-            raise FileNotFoundError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            version = s.run(cmd + ["shell", "getprop", "ro.build.id"], capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while getting build ID: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while getting build ID: {e}\x1b[0m")
-            raise
-        if version.returncode != 0:
-            print("\x1b[31mFailed to get version!\x1b[0m")
-            raise VersionError
+    def AndroidBuildID(conn: AdbConnection, say: bool = False) -> str | None:
+        version: str = conn.shell("getprop ro.build.id").strip()
+        if not version:
+            raise FailedToGetDeviceInfo("\x1b[31mFailed to get build ID!\x1b[0m")
         if say:
-            print(version.stdout.strip())
+            print(version)
         else:
-            return version.stdout.strip()
+            return version
 
 #--------------------------------------------------------------------------
 class SideloadAPK:
     @staticmethod
-    def SideloadAPK(ADBPath: str, APKPath: str, DeviceSerial: str = None) -> str:
-        ADBP = Path(ADBPath)
-        APKP = Path(APKPath)
-        if not ADBP.exists():
-            print(f"\x1b[31mPath: {ADBPath} is not a correct path for ADB!\x1b[0m")
-            raise SideloadError
+    def SideloadAPK(conn: AdbConnection, APKPath: str) -> None:
+        APKP: Path = Path(APKPath)
         if not APKP.exists():
-            print(f"\x1b[31mPath: {APKPath} is not a correct path for the APK!\x1b[0m")
-            raise SideloadError
+            raise FileNotFoundError(f"\x1b[31mPath: {APKPath} is not a correct path for the APK!\x1b[0m")
         if not APKP.suffix.lower() == ".apk":
-            print(f"\x1b[31mAPK: {APKPath} is not a .apk file!\x1b[0m")
-            raise SideloadError
-        cmd = [ADBPath]
-        if DeviceSerial:
-            cmd += ["-s", DeviceSerial]
-        try:
-            result = s.run(cmd + ["install", "-r", APKPath], capture_output=True, text=True)
-        except OSError as e:
-            print(f"\x1b[31mOS error while sideloading APK: {e}\x1b[0m")
-            raise
-        except ValueError as e:
-            print(f"\x1b[33mValue error while sideloading APK: {e}\x1b[0m")
-            raise
-        if result.returncode != 0:
-            print("\x1b[31mFailed to sideload app!\x1b[0m")
-            raise SideloadError
-
+            raise WrongFilePassedError(f"\x1b[31mAPK: {APKPath} is not a .apk file!\x1b[0m")
+        result: str = conn.shell(f"pm install -r {APKPath}")
+        if "Failure" in result or "Error" in result:
+            raise FailedToSideloadApp("\x1b[31mFailed to sideload app!\x1b[0m")
 #------------------------------------------------------------------------
+
