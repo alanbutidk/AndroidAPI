@@ -1,25 +1,21 @@
-from AndroidAPI import DeviceInfo, DevicePower, OpenApp, AndroidInfo, SideloadAPK
+from AndroidAPI import DeviceInfo, DevicePower, OpenApp, AndroidInfo
 from AdbConnect import AdbUsbConnect
+from time import sleep
 
-import os;os.system("")
-
-print("\x1b[31mMake sure to connect to USB before executing!\033[0m")
+print("\033[31mMake sure to connect to USB before executing!\033[0m")
 input("Press enter when you have connected your device")
 
 conn = AdbUsbConnect()
-print(DeviceInfo.GetDeviceInfo(conn))
+print(DeviceInfo(conn).GetDeviceInfo())
 
-AndroidInfo.AndroidVersion(conn, say=True)
-AndroidInfo.AndroidSDKVersion(conn, say=True)
-AndroidInfo.AndroidBuildID(conn, say=True)
+info = AndroidInfo(conn)
+info.AndroidVersion(say=True)
+info.AndroidSDKVersion(say=True)
+info.AndroidBuildID(say=True)
 
-OpenApp.Open(conn, "com.android.chrome")
-OpenApp.Close(conn, "com.android.chrome")
-
-a = input("Please enter yes or no to shutdown device: ")
-if a.lower == "yes":
-    DevicePower.Shutdown(conn, "graceful")
-else:
-    pass
+app = OpenApp(conn)
+app.Open("com.android.chrome")
+sleep(10)
+app.Close("com.android.chrome")
 
 conn.close()
